@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: touquand-backend
+    env: python
+    region: frankfurt
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "./start.sh"
+    plan: free
+    envVars:
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: SERP_API_KEY
+        sync: false
