@@ -4,3 +4,4 @@ python-dotenv
 requests
 pycountry
 replicate
+python-multipart
