@@ -21,7 +21,7 @@ load_dotenv()
 app = FastAPI(
     title="Touquand - Gemini Flash API",
     description="API d'extraction d'informations d'affiches via Google Gemini 1.5 Flash (Gratuit)",
-    version="3.1.1"
+    version="3.1.2"
 )
 
 # Configuration CORS
@@ -40,10 +40,24 @@ if not GOOGLE_API_KEY:
     print("⚠️  ATTENTION : GOOGLE_API_KEY manquante ! L'analyse échouera.")
 else:
     genai.configure(api_key=GOOGLE_API_KEY)
+    
+    # --- DIAGNOSTIC DÉMARRAGE : LISTER LES MODÈLES ---
+    print("🔎 VÉRIFICATION DES MODÈLES DISPONIBLES...")
+    try:
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+                print(f"   ✅ Trouvé : {m.name}")
+        
+        if not available_models:
+            print("   ⚠️ Aucun modèle 'generateContent' trouvé. Vérifiez votre clé API.")
+    except Exception as e:
+        print(f"   ❌ Erreur lors du listing des modèles : {e}")
+    print("------------------------------------------------")
 
-# ⚠️ CORRECTION DU NOM DU MODÈLE
-# On utilise la version spécifique "001" ou "latest" pour éviter l'erreur 404
-GEMINI_MODEL_NAME = 'gemini-1.5-flash-001'
+# On remet le nom standard. Si ça échoue, regardez les logs "VÉRIFICATION" ci-dessus.
+GEMINI_MODEL_NAME = 'gemini-1.5-flash'
 
 
 # === FONCTIONS UTILITAIRES ===
@@ -197,7 +211,6 @@ async def analyze_with_gemini(image_bytes: bytes) -> Dict[str, Any]:
 
     except Exception as e:
         print(f"❌ Erreur Gemini : {e}")
-        # Si le modèle échoue, on renvoie l'erreur pour la voir dans les logs
         raise e
 
 
