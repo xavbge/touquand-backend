@@ -1,9 +1,9 @@
 fastapi
-uvicorn[standard]
+uvicorn
+python-multipart
+pydantic
+google-generativeai>=0.7.2
+pillow
 python-dotenv
 requests
 pycountry
-replicate
-python-multipart
-google-generativeai
-pillow

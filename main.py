@@ -21,10 +21,10 @@ load_dotenv()
 app = FastAPI(
     title="Touquand - Gemini Flash API",
     description="API d'extraction d'informations d'affiches via Google Gemini 1.5 Flash (Gratuit)",
-    version="3.1.0"
+    version="3.1.1"
 )
 
-# Configuration CORS (Indispensable pour que le mobile puisse parler au backend)
+# Configuration CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,41 +39,40 @@ SERP_API_KEY = os.getenv("SERP_API_KEY")
 if not GOOGLE_API_KEY:
     print("⚠️  ATTENTION : GOOGLE_API_KEY manquante ! L'analyse échouera.")
 else:
-    # Configuration de Gemini
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# Modèle utilisé : Gemini 1.5 Flash (Rapide et Gratuit)
-GEMINI_MODEL_NAME = 'gemini-1.5-flash'
+# ⚠️ CORRECTION DU NOM DU MODÈLE
+# On utilise la version spécifique "001" ou "latest" pour éviter l'erreur 404
+GEMINI_MODEL_NAME = 'gemini-1.5-flash-001'
 
 
-# === FONCTIONS UTILITAIRES (Conservées de ton ancien code) ===
+# === FONCTIONS UTILITAIRES ===
 
 def clean_json_string(text: str) -> str:
-    """Nettoie une chaîne pour faciliter le parsing JSON (enlève le markdown)."""
+    """Nettoie une chaîne pour faciliter le parsing JSON."""
     text = re.sub(r'```json\s*', '', text)
     text = re.sub(r'```\s*', '', text)
     return text.strip()
 
 def extract_json_from_text(text: str) -> Dict[str, Any]:
-    """Extrait un objet JSON d'un texte brut avec plusieurs stratégies de secours."""
+    """Extrait un objet JSON d'un texte brut."""
     original_text = text
     text = clean_json_string(text)
     
-    # Stratégie 1 : Parsing direct
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
     
-    # Stratégie 2 : Regex pour trouver le bloc JSON
+    # Regex de secours
     json_match = re.search(r'\{[\s\S]*\}', text)
     if json_match:
         try:
             return json.loads(json_match.group(0))
         except json.JSONDecodeError:
             pass
-    
-    # Stratégie 3 : Tentative de réparation des guillemets simples (de ton code original)
+            
+    # Tentative de réparation des guillemets
     try:
         repaired = re.sub(r"'(\w+)':", r'"\1":', text)
         repaired = re.sub(r":\s*'([^']*)'", r': "\1"', repaired)
@@ -81,7 +80,6 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Échec
     print(f"❌ Échec parsing JSON. Texte reçu : {original_text[:200]}...")
     return {
         "parsing_failed": True,
@@ -90,7 +88,7 @@ def extract_json_from_text(text: str) -> Dict[str, Any]:
     }
 
 def validate_extracted_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Valide et normalise les données extraites (remplit les vides)."""
+    """Valide et normalise les données."""
     required_fields = ["titre", "date", "lieu", "prix", "categorie", "lien_billetterie", "description"]
     
     if data.get("parsing_failed"):
@@ -102,12 +100,11 @@ def validate_extracted_data(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 def detect_currency_from_location(location: str) -> Dict[str, str]:
-    """(Ton code original) Déduit la devise via Pycountry."""
+    """Déduit la devise via Pycountry."""
     if not location or location == "Non détecté":
         return {"currency": "EUR", "country": "France"}
         
     location_lower = location.lower()
-    # Mapping manuel rapide
     mapping = {
         "paris": ("EUR", "France"), "lyon": ("EUR", "France"), "france": ("EUR", "France"),
         "bruxelles": ("EUR", "Belgique"), "belgique": ("EUR", "Belgique"),
@@ -120,10 +117,9 @@ def detect_currency_from_location(location: str) -> Dict[str, str]:
         if key in location_lower:
             return {"currency": currency, "country": country}
 
-    # Fallback Pycountry
     for country in pycountry.countries:
         if country.name.lower() in location_lower:
-            currency = "EUR" # Défaut Europe
+            currency = "EUR"
             if hasattr(country, "alpha_2"):
                 if country.alpha_2 == "US": currency = "USD"
                 elif country.alpha_2 == "GB": currency = "GBP"
@@ -134,9 +130,8 @@ def detect_currency_from_location(location: str) -> Dict[str, str]:
     return {"currency": "EUR", "country": "France"}
 
 def search_web_for_price(event_name: str, location: str = "", category: str = "concert") -> Optional[str]:
-    """(Ton code original) Recherche une estimation de prix sur le web via SerpAPI."""
+    """Recherche une estimation de prix sur le web via SerpAPI."""
     if not SERP_API_KEY:
-        print("⚠️ Pas de SERP_API_KEY, recherche web désactivée.")
         return None
 
     print(f"🔍 Recherche Web pour : {event_name} à {location}")
@@ -159,7 +154,7 @@ def search_web_for_price(event_name: str, location: str = "", category: str = "c
     return None
 
 async def download_image(url: str) -> bytes:
-    """Télécharge une image depuis une URL (si l'app envoie une URL)."""
+    """Télécharge une image depuis une URL."""
     resp = requests.get(url, timeout=10)
     resp.raise_for_status()
     return resp.content
@@ -169,52 +164,40 @@ async def download_image(url: str) -> bytes:
 
 def generate_gemini_prompt() -> str:
     return """
-    Tu es un expert en analyse visuelle d'affiches d'événements culturels.
-    Ta mission est d'extraire les informations visibles de l'affiche et les retourner dans un format JSON strict.
+    Tu es un expert en analyse visuelle d'affiches d'événements.
+    Analyse cette image et extrais les informations suivantes au format JSON strict.
 
-    Champs requis dans le JSON :
-    - "titre": Titre exact de l'événement.
-    - "date": Date complète avec jour, mois, année et heure (ex: "Samedi 12 Juillet 2025 à 20h"). Cherche partout.
-    - "lieu": Nom de la salle et ville.
-    - "prix": Le prix ou "Gratuit". Si tu vois plusieurs prix, mets la fourchette. Si rien n'est indiqué, mets "Non détecté".
-    - "categorie": Type d'événement (Concert, Théâtre, Sport, Brocante, Conférence...).
-    - "lien_billetterie": Site web ou URL visible.
-    - "description": Résumé court en 2 phrases (artistes, contexte).
+    Champs requis :
+    - "titre": Titre de l'événement.
+    - "date": Date complète (Jour, Mois, Année, Heure).
+    - "lieu": Lieu exact et ville.
+    - "prix": Le prix ou "Gratuit" ou "Non détecté".
+    - "categorie": Type d'événement.
+    - "lien_billetterie": URL si visible.
+    - "description": Résumé court.
 
-    RÈGLES IMPORTANTES :
-    1. Réponds UNIQUEMENT avec le JSON valide.
-    2. Ne mets pas de balises markdown (```json).
-    3. Si une info est introuvable, écris "Non détecté".
+    RÉPONSE : UNIQUEMENT LE JSON.
     """
 
 async def analyze_with_gemini(image_bytes: bytes) -> Dict[str, Any]:
-    """Envoie l'image à Google Gemini Flash et retourne les données structurées."""
+    """Envoie l'image à Google Gemini Flash."""
     try:
-        # 1. Préparer le modèle
+        # Instanciation du modèle
         model = genai.GenerativeModel(GEMINI_MODEL_NAME)
         
-        # 2. Charger l'image avec PIL (Gemini demande un objet PIL pour la vision)
         image = Image.open(io.BytesIO(image_bytes))
         
-        # 3. Le prompt
-        prompt = generate_gemini_prompt()
+        print(f"🧠 Envoi à {GEMINI_MODEL_NAME}...")
+        response = model.generate_content([generate_gemini_prompt(), image])
         
-        print("🧠 Envoi à Gemini 1.5 Flash...")
-        # Appel à l'API (multimodal : texte + image)
-        response = model.generate_content([prompt, image])
+        print(f"📝 Réponse reçue (début): {response.text[:100]}")
         
-        # 4. Récupérer le texte de réponse
-        response_text = response.text
-        print(f"📝 Réponse brute Gemini : {response_text[:100]}...")
-        
-        # 5. Parser et valider le JSON
-        raw_data = extract_json_from_text(response_text)
-        validated_data = validate_extracted_data(raw_data)
-        
-        return validated_data
+        raw_data = extract_json_from_text(response.text)
+        return validate_extracted_data(raw_data)
 
     except Exception as e:
-        print(f"❌ Erreur lors de l'appel Gemini : {e}")
+        print(f"❌ Erreur Gemini : {e}")
+        # Si le modèle échoue, on renvoie l'erreur pour la voir dans les logs
         raise e
 
 
@@ -225,43 +208,33 @@ async def analyze_image(
     file: Optional[UploadFile] = File(None),
     image_url: Optional[str] = Form(None)
 ):
-    """
-    Route unique qui accepte soit un fichier uploadé, soit une URL d'image.
-    Utilise Gemini 1.5 Flash (Gratuit).
-    """
     try:
         image_bytes = None
-        
-        # 1. Récupération de l'image
         if file:
-            print(f"⬆️ Fichier uploadé : {file.filename}")
+            print(f"⬆️ Fichier : {file.filename}")
             image_bytes = await file.read()
         elif image_url:
-            print(f"⬆️ URL fournie : {image_url}")
+            print(f"⬆️ URL : {image_url}")
             image_bytes = await download_image(image_url)
         else:
-            raise HTTPException(status_code=400, detail="Aucune image fournie. Envoyez un fichier ou une image_url.")
+            raise HTTPException(status_code=400, detail="Aucune image fournie.")
 
-        # 2. Analyse Gemini
+        # Analyse
         structured_data = await analyze_with_gemini(image_bytes)
 
-        # 3. Complément automatique (Prix via Web Search) si manquant
+        # Fallback Prix
         if structured_data.get("prix") in ["Non détecté", None, ""]:
-            print("🔍 Prix non trouvé par l'IA, tentative de recherche Web...")
-            titre = structured_data.get("titre", "")
-            lieu = structured_data.get("lieu", "")
-            categorie = structured_data.get("categorie", "événement")
-            
-            estimation = search_web_for_price(titre, lieu, categorie)
-            if estimation:
-                structured_data["prix"] = estimation
-                print(f"💰 Prix trouvé sur le web : {estimation}")
-        
-        # 4. Ajout info devise (pour ton front-end si besoin)
-        currency_info = detect_currency_from_location(structured_data.get("lieu", ""))
-        structured_data["_meta"] = currency_info
+            print("🔍 Prix manquant, tentative Web...")
+            est = search_web_for_price(
+                structured_data.get("titre", ""), 
+                structured_data.get("lieu", ""), 
+                structured_data.get("categorie", "")
+            )
+            if est: structured_data["prix"] = est
 
-        # 5. Réponse finale
+        # Meta devise
+        structured_data["_meta"] = detect_currency_from_location(structured_data.get("lieu", ""))
+
         return JSONResponse({
             "success": True,
             "structured_data": structured_data,
@@ -269,30 +242,15 @@ async def analyze_image(
         })
 
     except Exception as e:
-        print(f"❌ Erreur critique serveur : {e}")
+        print(f"❌ Erreur critique : {e}")
         traceback.print_exc()
-        return JSONResponse(
-            {"success": False, "error": str(e)},
-            status_code=500
-        )
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 @app.get("/")
 def root():
-    return {
-        "service": "Touquand - Gemini API",
-        "status": "operational",
-        "model": GEMINI_MODEL_NAME
-    }
-
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "google_key_present": bool(GOOGLE_API_KEY)}
+    return {"status": "online", "model": GEMINI_MODEL_NAME}
 
 if __name__ == "__main__":
     import uvicorn
-    # Vérification simple au démarrage
-    if not os.getenv("GOOGLE_API_KEY"):
-        print("⚠️  ATTENTION : Variable GOOGLE_API_KEY manquante !")
-    
-    print(f"🚀 Serveur lancé sur [http://0.0.0.0:8000](http://0.0.0.0:8000) (Mode: {GEMINI_MODEL_NAME})")
+    if not os.getenv("GOOGLE_API_KEY"): print("⚠️ GOOGLE_API_KEY manquante")
     uvicorn.run(app, host="0.0.0.0", port=8000)
