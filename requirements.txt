@@ -5,3 +5,5 @@ requests
 pycountry
 replicate
 python-multipart
+google-generativeai
+pillow
